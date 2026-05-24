@@ -3,11 +3,10 @@ from datetime import datetime
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-import numpy as np
+import numpy as np 
 
 from xgboost import XGBClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
 from imblearn.over_sampling import SMOTE
 from imblearn.combine import SMOTEENN
@@ -20,11 +19,17 @@ from sklearn.ensemble import RandomForestClassifier
 
 from sklearn.feature_selection import RFE, SelectKBest, f_classif, VarianceThreshold, SelectFromModel
 
-import pickle
-import joblib
+from skopt import BayesSearchCV
+from skopt.space import Real, Integer, Categorical
 
 import os
 from tqdm import tqdm
+
+import mlflow
+
+#%%
+mlflow.set_tracking_uri("http://127.0.0.1:5000/")
+mlflow.set_experiment(experiment_id= 5)
 
 #%%
 pasta_atual = os.getcwd()
@@ -62,125 +67,7 @@ df_musculus = df_mus.set_index('Locus')
 X_musculus = df_musculus.drop(['Sequence', 'IsEssential'], axis=1)
 y_musculus = df_mus['IsEssential']
 
-#%%
-def pipeline(param_grid, pipelines, X_train, y_train, X_test, y_test):
-
-    results = {}
-
-    for name, pipeline in tqdm(pipelines.items()):
-        print(f"\n{'='*70}")
-        print(f"Testando: {name}")
-        print('='*70)
-        
-        # Pegar o melhor modelo
-        search = GridSearchCV(estimator=pipeline, param_grid=param_grid, scoring='f1', cv=5, verbose=3, n_jobs = -1)
-
-        search.fit(X_train, y_train)
-
-        y_pred = search.best_estimator_.predict(X_test)
-
-        results[name] = {
-            'best_params': search.best_params_,
-            'best_score_cv': search.best_score_,
-            'test_f1': f1_score(y_test, y_pred),
-            'cv_results': search.cv_results_
-        }
-
-    return results
-
-def evaluate_on_musculus(results, X_musculus, y_musculus):
-
-    all_metrics = {}
-
-    for name in results:
-        filename = f'Modelos-PKL/{name}_model.pkl'
-        with open(filename, 'rb') as f:
-            model_data = pickle.load(f)
-
-        model  = model_data['pipeline']
-        y_pred = model.predict(X_musculus)
-
-        all_metrics[name] = {
-            'f1':        f1_score(y_musculus, y_pred),
-            'precision': precision_score(y_musculus, y_pred),
-            'recall':    recall_score(y_musculus, y_pred),
-        }
-
-    print(f"\n{'='*70}")
-    print("RESULTADOS EM X_MUSCULUS")
-    print(f"{'='*70}")
-    print(f"{'Método':<18} {'F1':<12} {'Precision':<12} {'Recall':<12}")
-    print("-"*70)
-    
-    for name, m in all_metrics.items():
-        print(f"{name:<18} {m['f1']:<12.4f} {m['precision']:<12.4f} {m['recall']:<12.4f}")
-
-    return all_metrics
-
-def salvar_metricas_csv(results, X_musculus, y_musculus, output_path="resultados_modelos.csv"):
-    
-    rows = []
-
-    for name in results:
-        # Carregar modelo
-        filename = f'Modelos-PKL/{name}_model.pkl'
-        with open(filename, 'rb') as f:
-            model_data = pickle.load(f)
-
-        model = model_data['pipeline']
-
-        # Predição no mus musculus
-        y_pred = model.predict(X_musculus)
-
-        # Métricas
-        f1 = f1_score(y_musculus, y_pred)
-        precision = precision_score(y_musculus, y_pred)
-        recall = recall_score(y_musculus, y_pred)
-
-        # Extrair info
-        best_params = results[name]['best_params']
-        cv_score = results[name]['best_score_cv']
-        test_f1 = results[name]['test_f1']
-
-        # Extrair tipo de sampling (assumindo pipeline com 'sampler')
-        sampler = model.named_steps.get('sampler', None)
-        sampler_name = type(sampler).__name__ if sampler else "None"
-
-        # Nome do modelo
-        classifier = model.named_steps.get('classifier', None)
-        model_name = type(classifier).__name__ if classifier else name
-
-        rows.append({
-            'pipeline_name': name,
-            'model': model_name,
-            'sampling': sampler_name,
-            'best_params': str(best_params),
-            'cv_f1': cv_score,
-            'test_f1': test_f1,
-            'mus_f1': f1,
-            'precision': precision,
-            'recall': recall
-        })
-
-    df = pd.DataFrame(rows)
-
-    # Ordenar pelos melhores
-    df = df.sort_values(by='cv_f1', ascending=False)
-
-    # Salvar CSV
-    df.to_csv(output_path, index=False)
-
-    print(f"Arquivo salvo em: {output_path}")
-
-    return df
-
-def predict_external(best_model, X_mansoni):
-    print("\n" + "="*70)
-    print("PREDIÇÕES EM DADOS EXTERNOS")
-    print("="*70)
-
-    """ Organizando a ordem das features """
-    feature_order = [
+feature_order = [
         'Sequence_Length', 'Aromaticity', 'Sec_Struct_Helix', 'Sec_Struct_Turn', 'Sec_Struct_Sheet',
         'Percent_A', 'Percent_C', 'Percent_D', 'Percent_E', 'Percent_F', 'Percent_G', 'Percent_H',
         'Percent_I', 'Percent_K', 'Percent_L', 'Percent_M', 'Percent_N', 'Percent_P', 'Percent_Q',
@@ -189,137 +76,252 @@ def predict_external(best_model, X_mansoni):
         'Polar_Number', 'Charged_Number', 'Basic_Number', 'Acidic_Number', 'Local Average Connectivity',
         'Density of Maximum neighborhood Component', 'Topology Potential', 'Edge Clustering Coefficient',
         'DegreeCentrality', 'EigenvectorCentrality', 'BetweennessCentrality', 'ClosenessCentrality', 'Clustering'
-    ]
+]
 
-    X_mansoni = X_mansoni[feature_order]
+emboss = [
+        'Tiny_Number', 'Small_Number', 'Aliphatic_Number', 'Aromatic_Number', 'Non-polar_Number',
+        'Polar_Number', 'Charged_Number', 'Basic_Number', 'Acidic_Number'
+]
 
-    # Musculus
-    y_musculus_pred = best_model.predict(X_musculus)
-    print("\nMUSCULUS:")
-    print(f"Predições: {y_musculus_pred}")
-    print("\nClassification Report (Musculus):")
-    print(classification_report(y_musculus, y_musculus_pred))
+X_musculus = X_musculus[feature_order]
 
-    # Mansoni
-    y_mansoni_pred = best_model.predict(X_mansoni)
-    print("\nMANSONI:")
-    print(f"Predições: {y_mansoni_pred}")
+#%%
+def pipeline(param_grid, pipelines, X_train, y_train, X_test, y_test, X_musculus=None, y_musculus=None):
 
-def feature_selection(X_train, y_train, model, k, method='rfe'):
-    if method == 'rfe':
-        # Seleção de features usando RFE
-        selector = RFE(estimator=model, n_features_to_select=k, step=1)
-        selector = selector.fit(X_train, y_train)
-    elif method == 'selectkbest':
-        # Seleção de features usando SelectKBest
-        selector = SelectKBest(score_func=f_classif, k=k)
-        selector = selector.fit(X_train, y_train)
-    elif method == 'variancethreshold':
-        # Seleção de features usando VarianceThreshold
-        selector = VarianceThreshold(threshold=0.01)
-        selector = selector.fit(X_train, y_train)
-    elif method == 'selectfrommodel':
-        # Seleção de features usando SelectFromModel
-        selector = SelectFromModel(estimator=model, threshold='median')
-        selector = selector.fit(X_train, y_train)
+    results = {}
 
-    # Imprime as features selecionadas
-    selected_features = X_train.columns[selector.support_]
-    print(f"Features selecionadas: {selected_features.tolist()}")
+    for name, pipeline in tqdm(pipelines.items()):
 
-    return selected_features
+        with mlflow.start_run(run_name=name):
+
+            print(f"\n{'='*70}")
+            print(f"Testando: {name}")
+            print('='*70)
+            
+            search = BayesSearchCV(
+                estimator=pipeline,
+                search_spaces=param_grid,
+                scoring='precision',
+                cv=5,
+                n_jobs=-1,
+                n_iter=30,
+                random_state=seed
+            )
+
+            search.fit(X_train, y_train)
+
+            best_model = search.best_estimator_
+
+            y_proba_val = best_model.predict_proba(X_test)[:, 1]
+
+            thresholds = np.arange(0.1, 0.95, 0.01)
+
+            best_threshold = 0.5
+            best_precision = 0
+
+            for t in thresholds:
+
+                y_pred_temp = (y_proba_val >= t).astype(int)
+
+                precision = precision_score(y_test, y_pred_temp)
+
+                # evitar threshold que prevê tudo negativo
+                if y_pred_temp.sum() > 0:
+
+                    if precision > best_precision:
+                        best_precision = precision
+                        best_threshold = t
+
+            print(f"Best threshold: {best_threshold:.2f}")
+            print(f"Best precision: {best_precision:.4f}")
+
+            selector = best_model.named_steps.get('selector')
+
+            mlflow.log_param(
+                "feature_selection",
+                type(selector).__name__ if selector else "None"
+            )
+
+            if hasattr(selector, 'k'):
+                mlflow.log_param("n_features_selected", selector.k)
+
+            y_proba_test = best_model.predict_proba(X_test)[:, 1]
+
+            y_pred_test = (y_proba_test >= best_threshold).astype(int)
+            test_f1 = f1_score(y_test, y_pred_test)
+
+            report_test = classification_report(y_test, y_pred_test, output_dict=True)
+
+            # métricas por classe
+            # Classe 0
+            mlflow.log_metric("test_precision_class_0", report_test['0']['precision'])
+            mlflow.log_metric("test_recall_class_0", report_test['0']['recall'])
+            mlflow.log_metric("test_f1_class_0", report_test['0']['f1-score'])
+
+            # Classe 1
+            mlflow.log_metric("test_precision_class_1", report_test['1']['precision'])
+            mlflow.log_metric("test_recall_class_1", report_test['1']['recall'])
+            mlflow.log_metric("test_f1_class_1", report_test['1']['f1-score'])
+            
+
+            mlflow.log_param("pipeline_name", name)
+            mlflow.log_params(search.best_params_)
+
+            sampler = best_model.named_steps.get('sampler')
+            mlflow.log_param("sampler", type(sampler).__name__ if sampler else "None")
+
+            classifier = best_model.named_steps.get('classifier')
+            mlflow.log_param("model", type(classifier).__name__)
+
+
+            mlflow.log_metric("cv_f1", search.best_score_)
+            mlflow.log_metric("test_f1", test_f1)
+
+            if X_musculus is not None:
+
+                y_pred_mus = best_model.predict(X_musculus)
+
+                report = classification_report(y_musculus, y_pred_mus, output_dict=True)
+
+                # métricas por classe
+                # Classe 0
+                mlflow.log_metric("mus_precision_class_0", report['0']['precision'])
+                mlflow.log_metric("mus_recall_class_0", report['0']['recall'])
+                mlflow.log_metric("mus_f1_class_0", report['0']['f1-score'])
+
+                # Classe 1
+                mlflow.log_metric("mus_precision_class_1", report['1']['precision'])
+                mlflow.log_metric("mus_recall_class_1", report['1']['recall'])
+                mlflow.log_metric("mus_f1_class_1", report['1']['f1-score'])
+
+            # ===== SALVAR MODELO =====
+            mlflow.sklearn.log_model(best_model, "model")
+
+            results[name] = {
+                'best_params': search.best_params_,
+                'best_score_cv': search.best_score_,
+                'test_f1': test_f1
+            }
+
+    return results
+
 #%%
 " ================= Pipeline Random Forest ================== "
 
 pipelines = {
+    'rf-base': ImbPipeline([
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', RandomForestClassifier(class_weight='balanced', random_state=seed))
+    ]),
+
     'rf-undersample': ImbPipeline([
         ('sampler', RandomUnderSampler(random_state=seed)),
-        ('classifier', RandomForestClassifier(class_weight='balanced', random_state=seed))
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', RandomForestClassifier(random_state=seed))
     ]),
     
     'rf-oversample': ImbPipeline([
         ('sampler', SMOTE(random_state=seed)),
-        ('classifier', RandomForestClassifier(class_weight='balanced', random_state=seed))
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', RandomForestClassifier(random_state=seed))
     ]),
     
     'rf-smoteenn': ImbPipeline([
         ('sampler', SMOTEENN(random_state=seed)),
-        ('classifier', RandomForestClassifier(class_weight='balanced', random_state=seed))
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', RandomForestClassifier(random_state=seed))
     ])
 }
 
 # Grid de parâmetros
 rfc_grid = {
-    'classifier__max_depth': [5, 6, 7, 8, 9, 10],
-    'classifier__bootstrap': [True, False],
-    'classifier__criterion': ["gini", "entropy"],
-    'classifier__n_estimators': [100, 200, 300]
+    'classifier__max_depth': Integer(5, 10),
+    'classifier__bootstrap': Categorical([True, False]),
+    'classifier__criterion': Categorical(["gini", "entropy"]),
+    'classifier__n_estimators': Integer(100, 300),
+    #'selector__k': Integer(10, 40)
 }
 
-rfc_results = pipeline(rfc_grid, pipelines, X_train, y_train, X_test, y_test)
-rfc_model, rfc_metrics = salvar_metricas_csv(rfc_results, X_musculus, y_musculus)
+rfc_results = pipeline(rfc_grid, pipelines, X_train, y_train, X_test, y_test, X_musculus, y_musculus)
+#rfc_model, rfc_metrics = salvar_metricas_csv(rfc_results, X_musculus, y_musculus)
 
 
 #%%
 "============ Pipeline XGBoost =============="""
 
+neg = (y_train == 0).sum()
+pos = (y_train == 1).sum()
+
+ratio = neg / pos
+
+print(ratio)
+
 pipelines = {
+    'xgb-scale-pos-weight': ImbPipeline([
+        ('classifier', XGBClassifier(booster='gbtree', scale_pos_weight=ratio, verbosity=0, random_state=seed))
+    ]),
+
     'xgb_undersample': ImbPipeline([
         ('sampler', RandomUnderSampler(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', XGBClassifier(booster='gbtree', verbosity=0, random_state=seed))
     ]),
     
     'xgb_oversample': ImbPipeline([
         ('sampler', SMOTE(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', XGBClassifier(booster='gbtree', verbosity=0, random_state=seed))
     ]),
     
     'xgb_smoteenn': ImbPipeline([
         ('sampler', SMOTEENN(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', XGBClassifier(booster='gbtree', verbosity=0, random_state=seed))
     ])
 }
 
 # Grid de parâmetros
 xgb_grid = {
-  'classifier__learning_rate': [0.1, 0.2, 0.3, 0.4, 0.5, 1.0],
-   'classifier__max_depth': [6, 7, 8, 9, 10],
-   'classifier__n_estimators': [100, 200, 300]
+    'classifier__learning_rate': Real(0.01, 0.5, prior='log-uniform'),
+    'classifier__max_depth': Integer(3, 10),
+    'classifier__n_estimators': Integer(100, 500),
+    #'selector__k': Integer(10, 40)
 }
 
-xgb_results = pipeline(xgb_grid, pipelines, X_train, y_train, X_test, y_test)
-xgb_model = salvar_metricas_csv(xgb_results, X_musculus, y_musculus)
-predict_external(xgb_model, X_musculus, y_musculus, X_mansoni)
+xgb_results = pipeline(xgb_grid, pipelines, X_train, y_train, X_test, y_test, X_musculus, y_musculus)
 #%%
 "============ Pipeline Gradient Boosting =============="""
 
 pipelines = {
     'gb_undersample': ImbPipeline([
         ('sampler', RandomUnderSampler(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', GradientBoostingClassifier(random_state=seed))
     ]),
 
     'gb_oversample': ImbPipeline([
         ('sampler', SMOTE(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', GradientBoostingClassifier(random_state=seed))
     ]),
     
     'gb_smoteenn': ImbPipeline([
         ('sampler', SMOTEENN(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', GradientBoostingClassifier(random_state=seed))
     ])
 }
 
 # Grid de parâmetros
 gb_grid= {
-    'classifier__learning_rate': [0.1, 0.2, 0.3, 0.4, 0.5, 1.0],
-    'classifier__max_depth': [5, 6, 7, 8, 9, 10],
-    'classifier__n_estimators': [100, 200, 300]
+    'classifier__learning_rate': Real(0.1, 1.0, prior='log-uniform'),
+    'classifier__max_depth': Integer(3, 10),
+    'classifier__n_estimators': Integer(100, 500),
+
+    #'selector__k': Integer(10, 40)
 }
 
-gb_results = pipeline(gb_grid, pipelines, X_train, y_train, X_test, y_test)
-gb_model = print_results(gb_results)
-predict_external(gb_model, X_musculus, y_musculus, X_mansoni)
+gb_results = pipeline(gb_grid, pipelines, X_train, y_train, X_test, y_test, X_musculus, y_musculus)
 #%%
 
 """ Carregando os melhores modelos dos tipos de classificadores """

@@ -1,2 +1,5 @@
 venv
 .env
+Classificador/mlartifacts/*
+mlflow.db
+Classificador/mlflow.db
