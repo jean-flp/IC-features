@@ -1,4 +1,5 @@
 venv
+venv381
 .env
 Classificador/mlartifacts/*
 mlflow.db
