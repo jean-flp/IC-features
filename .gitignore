@@ -4,3 +4,4 @@ venv381
 Classificador/mlartifacts/*
 mlflow.db
 Classificador/mlflow.db
+data/processed/embeddings/sequence/esm/global.embedding.esm.tsv
