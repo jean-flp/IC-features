@@ -6,34 +6,46 @@ import torch
 import gc
 
 model_dict = {
-    "facebook/esm2_t36_3B_UR50D": Esm,
+    "facebook/esm2_t36_3B_UR50D":Esm, #"facebook/esm2_t36_3B_UR50D": Esm,
     "Rostlab/prot_t5_xl_uniref50": ProteinT5
 }
 
 class ModelContext:
     def __init__(self):
         self.strategy: BaseModel = None
-        self.model = None
 
-    def setStrategy(self, model_name):
-        self.strategy_class = model_dict.get(model_name)
-        if self.strategy_class is None:
+    def setStrategy(self, model_name: str):
+        strategy_class = model_dict.get(model_name)
+
+        if strategy_class is None:
             raise ValueError(f"Modelo não suportado: {model_name}")
+
+        self.strategy_class = strategy_class
         self.model_name = model_name
+
         return self
 
-    def initializeModel(self, device, model_string):
-        self.device = device
-        self.model = self.strategy_class(device, model_string)
+    def initializeModel(self, device: str, model_string: str):
+        self.strategy = self.strategy_class(device, model_string)
         return self
 
-    def predict(self, inputs):
-        return self.model.computeTokens(inputs)
-
+    def tokenize(self, sequences, padding=True, max_length=None):
+        return self.strategy.TokenizerInput(
+            sequences,
+            padding=padding,
+            max_length=max_length
+        )
+    def computeTokens(self):
+        return self.strategy.computeTokens()
+    
+    def computeSentenceEmbeddings(self):
+        return self.strategy.computeSentenceEmbeddings().detach().cpu().numpy()
+    
     def clear(self):
-        if self.model is not None:
-            del self.model
-            self.model = None
+        import gc
+        if self.strategy is not None:
+            del self.strategy
+            self.strategy = None
 
         gc.collect()
 

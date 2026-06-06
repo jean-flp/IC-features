@@ -7,7 +7,6 @@ from transformers import (
 )
 
 import torch
-import torch.nn.functional as F
 import re
 
 
@@ -22,7 +21,8 @@ class ProteinT5(BaseModel):
         try:
 
             model = T5EncoderModel.from_pretrained(
-                model_string
+                model_string,
+                torch_dtype=torch.float16
             ).to(device)
 
             tokenizer = T5Tokenizer.from_pretrained(
@@ -43,10 +43,11 @@ class ProteinT5(BaseModel):
 
     def TokenizerInput(
         self,
-        sentences: list[str]
+        sentences: list[str],
+        padding=True,
+        max_length=None
     ) -> dict:
 
-        # substitui aminoácidos raros/ambíguos
         sequences_formatted = [
             " ".join(
                 list(
@@ -58,9 +59,9 @@ class ProteinT5(BaseModel):
 
         self.tokens = self.tokenizer(
             sequences_formatted,
-            add_special_tokens=True,
-            padding=True,
             truncation=True,
+            padding=padding,
+            max_length=max_length,
             return_tensors="pt"
         )
 
@@ -73,9 +74,9 @@ class ProteinT5(BaseModel):
             if self.tokens is None:
                 raise TokensModelException(self)
 
-            input_ids = self.tokens["input_ids"].to(
-                self.device
-            )
+            input_ids = self.tokens[
+                "input_ids"
+            ].to(self.device)
 
             attention_mask = self.tokens[
                 "attention_mask"
@@ -83,7 +84,7 @@ class ProteinT5(BaseModel):
 
             self.model.eval()
 
-            with torch.no_grad():
+            with torch.inference_mode():
 
                 model_output = self.model(
                     input_ids=input_ids,
@@ -97,11 +98,10 @@ class ProteinT5(BaseModel):
 
     @staticmethod
     def mean_pooling(
-        model_output,
+        hidden_states,
         attention_mask
     ):
-
-        token_embeddings = model_output.last_hidden_state
+        token_embeddings = hidden_states.last_hidden_state
 
         input_mask_expanded = (
             attention_mask
@@ -110,29 +110,28 @@ class ProteinT5(BaseModel):
             .float()
         )
 
-        return torch.sum(
+        pooled = torch.sum(
             token_embeddings * input_mask_expanded,
-            1
+            dim=1
         ) / torch.clamp(
-            input_mask_expanded.sum(1),
+            input_mask_expanded.sum(dim=1),
             min=1e-9
         )
 
-    def computeSentenceEmbeddings(self):
+        return pooled
+
+    def computeSentenceEmbeddings(
+        self,
+        remove_eos=True
+    ):
 
         model_output = self.computeTokens()
 
         sentence_embeddings = self.mean_pooling(
-            model_output,
-            self.tokens["attention_mask"].to(
-                self.device
-            )
-        )
-        #normalize por sua magnitude 
-        sentence_embeddings = F.normalize(
-            sentence_embeddings,
-            p=2, # norma euclidiana 
-            dim=1
+            hidden_states=model_output,
+            attention_mask=self.tokens[
+                "attention_mask"
+            ].to(self.device)
         )
 
         return sentence_embeddings

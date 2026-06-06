@@ -1,5 +1,5 @@
 #%%
-from transformers import AutoTokenizer, AutoModelForMaskedLM
+from sklearn.model_selection import train_test_split
 import torch
 from model.strategy_model import ModelContext
 from huggingface_hub import login
@@ -9,9 +9,14 @@ from Bio import SeqIO
 import re
 import numpy as np
 import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+import gc
 
 load_dotenv()
 __HF_KEY_TOKEN__ = os.getenv("HF_KEY_TOKEN")
+__SEED__ = os.getenv("__SEED__")
 #print(__HF_KEY_TOKEN__)
 
 login(__HF_KEY_TOKEN__)
@@ -36,7 +41,7 @@ calculo_feature_dir = os.getcwd()
 print(calculo_feature_dir)
 
 path_data_processed = os.path.abspath(
-    os.path.join(calculo_feature_dir, "../../../data/processed/embeddings/sequence/proteinbert")
+    os.path.join(calculo_feature_dir, "../../../data/processed/embeddings/sequence/")
 )
 print(path_data_processed)
 path_data_raw = os.path.abspath(
@@ -55,14 +60,6 @@ models = {
     "prot":{"model":None,"tokenizer":None}
 }
 
-#%%
-for k, model_name in models_name.items():
-    context = ModelContext()
-    context.setStrategy(model_name)
-    context.initializeModel(device, model_name)
-    models[k]["model"] = context
-
-#%%
 def lerFastaBio(arquivo):
     arquivoFasta = SeqIO.parse(open(arquivo), 'fasta')
 
@@ -74,57 +71,210 @@ def lerFastaBio(arquivo):
     return dict_fasta
 # calcular embeddings dividindo por bucket
 
+#%%
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 pastas = os.listdir(path_data_raw)
+context = ModelContext()
 
-for pasta in pastas:
+for k, model_name in models_name.items():
 
-    file_name = os.listdir(f"{path_data_raw}/{pasta}")[0]
-    file_path_to_process = os.path.join(f"{path_data_raw}\\{pasta}\\{file_name}")
+    with context.setStrategy(model_name) as model:
 
-    print(pasta)
-    print(file_name)
-    print(file_path_to_process)
+        print(f"\nModel: {model_name}")
 
-    dict_seq = lerFastaBio(file_path_to_process)
+        model.initializeModel(device=device, model_string=model_name)
 
-    protein_ids = list(dict_seq.keys())
-    sequences_raw = list(dict_seq.values())
+        embeddings_list = []
 
-    # limpeza robusta
-    clean_ids = []
-    clean_seqs = []
-    VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
-    for pid, seq in zip(protein_ids, sequences_raw):
+        for pasta in pastas:
+            file_name = os.listdir(f"{path_data_raw}/{pasta}")[0]
+            file_path_to_process = os.path.join(f"{path_data_raw}\\{pasta}\\{file_name}")
 
-        if not isinstance(seq, str):
-            continue
+            dict_seq = lerFastaBio(file_path_to_process)
 
-        seq = seq.upper()
-        seq = re.sub(r"[^A-Z]", "", seq)
+            protein_ids = list(dict_seq.keys())
+            sequences_raw = list(dict_seq.values())
+            clean_ids = []
+            clean_seqs = []
+            VALID_AA = set("ACDEFGHIKLMNPQRSTVWY")
 
-        # remove vazias ou muito pequenas
-        if len(seq) < 5:
-            continue
+            for pid, seq in zip(protein_ids, sequences_raw):
+                if not isinstance(seq, str):
+                    continue
 
-        # remove aminoácidos inválidos
-        if not set(seq).issubset(VALID_AA):
-            continue
+                seq = seq.upper()
+                seq = re.sub(r"[^A-Z]", "", seq)
 
-        clean_ids.append(pid)
-        clean_seqs.append(seq)
+                if len(seq) < 5:
+                    continue
 
-    df_sequencias = pd.DataFrame({
-        "protein_id": clean_ids,
-        "sequence": clean_seqs
-    })
+                if not set(seq).issubset(VALID_AA):
+                    continue
 
-    sorted_df = df_sequencias.sort_values(
-        by="sequence",
-        key=lambda x: x.str.len(),
-        ignore_index=True
-    )
+                clean_ids.append(pid)
+                clean_seqs.append(seq)
 
-    n_buckets = 32
-    bucket_size = int(np.ceil(len(sorted_df) / n_buckets))
+            df_sequencias = pd.DataFrame({
+                "protein_id": clean_ids,
+                "sequence": clean_seqs
+            })
 
-    buckets = {}
+            sorted_df = df_sequencias.sort_values(
+                by="sequence",
+                key=lambda x: x.str.len(),
+                ignore_index=True
+            )
+
+            n_buckets = 32
+            bucket_size = int(np.ceil(len(sorted_df) / n_buckets))
+
+            buckets = []
+
+            for bucket_id in range(n_buckets):
+                inicio = bucket_id * bucket_size
+                fim = min((bucket_id + 1) * bucket_size, len(sorted_df))
+
+                bucket_df = sorted_df.iloc[inicio:fim]
+
+                if len(bucket_df) == 0:
+                    continue
+
+                buckets.append({
+                    "data": bucket_df,
+                    "max_len": bucket_df["sequence"].str.len().max()
+                })
+            batch_size = 16
+            max_model_len = 1022  # limite seguro para ESM2 3B (evita explosão de memória)
+
+            pbar_buckets = tqdm(
+                buckets,
+                desc=f"Processing {k}",
+                dynamic_ncols=True,
+                ascii=True,
+                mininterval=0.1
+            )
+            for bucket_idx, bucket in enumerate(pbar_buckets):
+
+                sequences_all = list(bucket["data"]["sequence"])
+                protein_ids_all = list(bucket["data"]["protein_id"])
+
+                max_len_bucket = int(bucket["max_len"])
+
+                pbar_buckets.set_postfix({
+                    "bucket": bucket_idx,
+                    "n_seq": len(sequences_all),
+                    "max_len": max_len_bucket
+                })
+
+                print(
+                    f"Bucket {bucket_idx}: "
+                    f"{len(sequences_all)} seqs | "
+                    f"max_len={max_len_bucket}"
+                )
+
+                if max_len_bucket > 1000:
+                    batch_size = 1
+                elif max_len_bucket > 700:
+                    batch_size = 2
+                elif max_len_bucket > 400:
+                    batch_size = 4
+                else:
+                    batch_size = 8
+
+                batch_pbar = tqdm(
+                    range(0, len(sequences_all), batch_size),
+                    desc=f"Bucket {bucket_idx} batches",
+                    leave=False,
+                    dynamic_ncols=True,
+                    ascii=True,
+                    mininterval=0.1
+                )
+
+                for i in batch_pbar:
+
+                    batch_seqs = sequences_all[i:i + batch_size]
+                    batch_ids = protein_ids_all[i:i + batch_size]
+
+                    batch_pbar.set_postfix({
+                        "batch_size": len(batch_seqs)
+                    })
+
+                    model.tokenize(
+                        sequences=batch_seqs,
+                        padding=True,
+                        max_length=min(bucket["max_len"], max_model_len)
+                    )
+
+                    embeddings = model.computeSentenceEmbeddings()
+
+                    if torch.is_tensor(embeddings):
+                        embeddings = embeddings.detach().cpu().numpy()
+
+                    df_temp = pd.DataFrame(embeddings)
+                    df_temp.insert(0, "protein_id", batch_ids)
+
+                    embeddings_list.append(df_temp)
+                    del embeddings
+
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                gc.collect()
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                        
+            
+
+        df_embeddings_sentence = pd.concat(
+            embeddings_list,
+            ignore_index=True
+        )
+
+        df_man = df_embeddings_sentence[
+            df_embeddings_sentence["protein_id"].apply(lambda x: x.split('.')[0]).isin({'6183'})
+        ]
+
+        df_mus = df_embeddings_sentence[
+            df_embeddings_sentence["protein_id"].apply(lambda x: x.split('.')[0]).isin({'10090'})
+        ]
+
+        df_org_modelos = df_embeddings_sentence[
+            ~df_embeddings_sentence["protein_id"].apply(lambda x: x.split('.')[0]).isin({'6183', '10090'})
+        ]
+
+        pca_man = df_man.drop(columns=["protein_id"]).values
+        pca_mus = df_mus.drop(columns=["protein_id"]).values
+        pca_org_modelos = df_org_modelos.drop(columns=["protein_id"]).values
+
+        data_to_fit,_ = train_test_split(pca_org_modelos,random_state=__SEED__,test_size=0.2)
+
+        scaler = StandardScaler()
+        scaler_fit = scaler.fit(data_to_fit)
+
+        pca_org_modelos_stand = scaler_fit.transform(pca_org_modelos)
+        pca_man_stand = scaler_fit.transform(pca_man)
+        pca_mus_stand = scaler_fit.transform(pca_mus)
+
+        pca_data_fit  = scaler_fit.transform(data_to_fit) 
+
+        pca_calc = PCA(n_components=0.95, random_state=__SEED__)
+        pca_calc_fit = pca_calc.fit(pca_data_fit)
+
+        pca_fin_org = pca_calc_fit.transform(pca_org_modelos_stand)
+        pca_fin_man = pca_calc_fit.transform(pca_man_stand)
+        pca_fin_mus = pca_calc_fit.transform(pca_mus_stand)
+
+        df_pos_pca_org = pd.DataFrame(pca_fin_org)
+        df_pos_pca_man = pd.DataFrame(pca_fin_man)
+        df_pos_pca_mus = pd.DataFrame(pca_fin_mus)
+
+        df_pos_pca_org.insert(0, "protein_id", list(df_org_modelos["protein_id"]))
+        df_pos_pca_man.insert(0, "protein_id", list(df_man["protein_id"]))
+        df_pos_pca_mus.insert(0, "protein_id", list(df_mus["protein_id"]))
+
+        path_pasta_model = os.path.join(path_data_processed,k)
+        # saves
+        df_pos_pca_org.to_csv(os.path.join(path_pasta_model, f"all.global.embedding.pca.{k}.tsv"), sep=' ', index=False)
+        df_pos_pca_man.to_csv(os.path.join(path_pasta_model, f"6183.global.embedding.pca.{k}.tsv"), sep=' ', index=False)
+        df_pos_pca_mus.to_csv(os.path.join(path_pasta_model, f"10090.global.embedding.pca.{k}.tsv"), sep=' ', index=False)
+        df_embeddings_sentence.to_csv(os.path.join(path_pasta_model, f"global.embedding.{k}.tsv"), sep=' ', index=False)

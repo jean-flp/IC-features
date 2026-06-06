@@ -16,7 +16,11 @@ import torch
 import torch.nn.functional as F
 import os
 import re
+from dotenv import load_dotenv
+from sklearn.model_selection import train_test_split
 
+load_dotenv()
+__SEED__ = os.getenv("__SEED__")
 # =============================================================================
 # PATHS
 # =============================================================================
@@ -223,15 +227,20 @@ pca_man = df_man.drop(columns=["protein_id"]).values
 pca_mus = df_mus.drop(columns=["protein_id"]).values
 pca_org_modelos = df_org_modelos.drop(columns=["protein_id"]).values
 
+data_to_fit, _ = train_test_split(pca_org_modelos,random_state=__SEED__,test_size=0.2)
+
 scaler = StandardScaler()
-scaler_fit = scaler.fit(pca_org_modelos)
+
+scaler_fit = scaler.fit(data_to_fit)
 
 pca_org_modelos_stand = scaler_fit.transform(pca_org_modelos)
 pca_man_stand = scaler_fit.transform(pca_man)
 pca_mus_stand = scaler_fit.transform(pca_mus)
 
-pca_calc = PCA(n_components=0.95, random_state=42)
-pca_calc_fit = pca_calc.fit(pca_org_modelos_stand)
+pca_data_fit = scaler_fit.transform(data_to_fit)
+
+pca_calc = PCA(n_components=0.95, random_state=__SEED__)
+pca_calc_fit = pca_calc.fit(pca_data_fit)
 
 pca_fin_org = pca_calc_fit.transform(pca_org_modelos_stand)
 pca_fin_man = pca_calc_fit.transform(pca_man_stand)
@@ -268,3 +277,4 @@ df_pos_pca_org.to_csv(nome_arquivo_final_pca_global_org,sep=' ',index=False)
 df_pos_pca_man.to_csv(nome_arquivo_final_pca_global_man,sep=' ',index=False)
 df_pos_pca_mus.to_csv(nome_arquivo_final_pca_global_mus,sep=' ',index=False)
 df_embeddings_sentence.to_csv(nome_arquivo_final_global,sep=' ',index=False)
+# %%

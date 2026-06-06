@@ -10,7 +10,7 @@ from transformers import (
 )
 
 import torch
-
+import re
 
 class Esm(BaseModel):
 
@@ -24,6 +24,7 @@ class Esm(BaseModel):
 
             model = EsmModel.from_pretrained(
                 model_string,
+                torch_dtype=torch.float16
             ).to(device)
 
             model.eval()
@@ -48,7 +49,6 @@ class Esm(BaseModel):
         self,
         sequences,
         padding=True,
-        #truncation=True,
         max_length=None
     ):
 
@@ -56,34 +56,22 @@ class Esm(BaseModel):
 
             if isinstance(sequences, str):
                 sequences = [sequences]
+            # substitui aminoácidos raros/ambíguos
+            sequences_formatted = [
+                " ".join(
+                    list(
+                        re.sub(r"[UZOB]", "X", sequence)
+                    )
+                )
+                for sequence in sequences
+            ]
 
-            inputs = self.tokenizer(
-                sequences,
+            self.tokens = self.tokenizer(
+                sequences_formatted,
                 return_tensors="pt",
+                truncation=True,
                 padding=padding,
-                #truncation=truncation,
                 max_length=max_length
-            )
-
-            inputs = {
-                key: value.to(self.device)
-                for key, value in inputs.items()
-            }
-
-            return inputs
-
-        except Exception as err:
-            raise TokensModelException(err)
-
-    def computeTokens(
-        self,
-        sequences
-    ):
-
-        try:
-
-            self.tokens = self.TokenizerInput(
-                sequences=sequences
             )
 
             return self.tokens
@@ -91,112 +79,73 @@ class Esm(BaseModel):
         except Exception as err:
             raise TokensModelException(err)
 
-    def mean_pooling(
-        self,
-        embeddings,
-        attention_mask,
-        remove_special_tokens=True
+    def computeTokens(
+        self
     ):
 
-        if remove_special_tokens:
+        try:
 
-            # remove <cls> e <eos>
-            embeddings = embeddings[:, 1:-1]
+            if self.tokens is None:
+                raise TokensModelException(self)
 
-            attention_mask = attention_mask[:, 1:-1]
+            input_ids = self.tokens[
+                "input_ids"
+            ].to(self.device)
 
-        mask = attention_mask.unsqueeze(-1)
+            attention_mask = self.tokens[
+                "attention_mask"
+            ].to(self.device)
 
-        masked_embeddings = embeddings * mask
+            self.model.eval()
 
-        sum_embeddings = masked_embeddings.sum(dim=1)
+            with torch.inference_mode():
 
-        seq_lengths = mask.sum(dim=1)
+                model_output = self.model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask
+                )
 
-        pooled_embeddings = (
-            sum_embeddings / seq_lengths
+            return model_output
+
+        except Exception as err:
+            raise err
+
+    @staticmethod
+    def mean_pooling(
+        hidden_states,
+        attention_mask
+    ):
+        token_embeddings = hidden_states.last_hidden_state
+
+        input_mask_expanded = (
+            attention_mask
+            .unsqueeze(-1)
+            .expand(token_embeddings.size())
+            .float()
         )
 
-        return pooled_embeddings
+        pooled = torch.sum(
+            token_embeddings * input_mask_expanded,
+            dim=1
+        ) / torch.clamp(
+            input_mask_expanded.sum(dim=1),
+            min=1e-9
+        )
+
+        return pooled
 
     def computeSentenceEmbeddings(
         self,
-        sequences,
-        pooling_strategy="mean",
-        remove_special_tokens=True,
-        normalize=False
+        remove_eos=True
     ):
 
-        try:
+        model_output = self.computeTokens()
 
-            inputs = self.computeTokens(
-                sequences=sequences
-            )
+        sentence_embeddings = self.mean_pooling(
+            hidden_states=model_output,
+            attention_mask=self.tokens[
+                "attention_mask"
+            ].to(self.device)
+        )
 
-            with torch.no_grad():
-
-                outputs = self.model(**inputs)
-
-                embeddings = outputs.last_hidden_state
-
-                if pooling_strategy == "mean":
-
-                    embeddings = self.mean_pooling(
-                        embeddings=embeddings,
-                        attention_mask=inputs[
-                            "attention_mask"
-                        ],
-                        remove_special_tokens=remove_special_tokens
-                    )
-
-                elif pooling_strategy == "cls":
-
-                    embeddings = embeddings[:, 0]
-
-                else:
-
-                    raise ValueError(
-                        f"Pooling strategy "
-                        f"{pooling_strategy} "
-                        f"not supported."
-                    )
-
-                if normalize:
-
-                    embeddings = torch.nn.functional.normalize(
-                        embeddings,
-                        p=2,
-                        dim=1
-                    )
-
-            return embeddings
-
-        except Exception as err:
-            raise TokensModelException(err)
-
-    def computeResidueEmbeddings(
-        self,
-        sequences,
-        remove_special_tokens=True
-    ):
-
-        try:
-
-            inputs = self.computeTokens(
-                sequences=sequences
-            )
-
-            with torch.no_grad():
-
-                outputs = self.model(**inputs)
-
-                embeddings = outputs.last_hidden_state
-
-                if remove_special_tokens:
-
-                    embeddings = embeddings[:, 1:-1]
-
-            return embeddings
-
-        except Exception as err:
-            raise TokensModelException(err)
+        return sentence_embeddings
