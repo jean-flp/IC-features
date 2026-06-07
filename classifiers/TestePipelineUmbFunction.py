@@ -8,7 +8,7 @@ import numpy as np
 from xgboost import XGBClassifier
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 
-from imblearn.over_sampling import SMOTE
+from imblearn.over_sampling import SMOTE, RandomOverSampler
 from imblearn.combine import SMOTEENN
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline as ImbPipeline
@@ -29,7 +29,7 @@ import mlflow
 
 #%%
 mlflow.set_tracking_uri("http://127.0.0.1:5000/")
-mlflow.set_experiment(experiment_id= 5)
+mlflow.set_experiment(experiment_id= 7)
 
 #%%
 pasta_atual = os.getcwd()
@@ -53,7 +53,7 @@ X = df.drop(['Locus','IsEssential', 'Sequence'], axis=1)
 
 y = df['IsEssential']
 test_size = 0.2
-seed = 42
+seed = 0
 X_train, X_test, y_train, y_test = train_test_split(X, y, 
                                                     test_size=test_size, 
                                                     random_state=seed, 
@@ -98,56 +98,65 @@ def pipeline(param_grid, pipelines, X_train, y_train, X_test, y_test, X_musculus
             print(f"Testando: {name}")
             print('='*70)
             
-            search = BayesSearchCV(
+            # search = BayesSearchCV(
+            #     estimator=pipeline,
+            #     search_spaces=param_grid,
+            #     scoring='roc-auc',
+            #     cv=5,
+            #     n_jobs=-1,
+            #     n_iter=30,
+            #     random_state=seed
+            # )
+
+            search = GridSearchCV(
                 estimator=pipeline,
-                search_spaces=param_grid,
-                scoring='precision',
+                param_grid=param_grid,
+                scoring='roc_auc',
                 cv=5,
                 n_jobs=-1,
-                n_iter=30,
-                random_state=seed
             )
 
             search.fit(X_train, y_train)
 
             best_model = search.best_estimator_
 
-            y_proba_val = best_model.predict_proba(X_test)[:, 1]
+            # y_proba_val = best_model.predict_proba(X_test)[:, 1]
 
-            thresholds = np.arange(0.1, 0.95, 0.01)
+            # thresholds = np.arange(0.1, 0.95, 0.01)
 
-            best_threshold = 0.5
-            best_precision = 0
+            # best_threshold = 0.5
+            # best_f1 = 0
 
-            for t in thresholds:
+            # for t in thresholds:
 
-                y_pred_temp = (y_proba_val >= t).astype(int)
+            #     y_pred_temp = (y_proba_val >= t).astype(int)
 
-                precision = precision_score(y_test, y_pred_temp)
+            #     f1 = f1_score(y_test, y_pred_temp)
 
-                # evitar threshold que prevê tudo negativo
-                if y_pred_temp.sum() > 0:
+            #     # evitar threshold que prevê tudo negativo
+            #     if y_pred_temp.sum() > 0:
 
-                    if precision > best_precision:
-                        best_precision = precision
-                        best_threshold = t
+            #         if f1 > best_f1:
+            #             best_f1 = f1
+            #             best_threshold = t
 
-            print(f"Best threshold: {best_threshold:.2f}")
-            print(f"Best precision: {best_precision:.4f}")
+            # print(f"Best threshold: {best_threshold:.2f}")
+            # print(f"Best f1: {best_f1:.4f}")
 
-            selector = best_model.named_steps.get('selector')
+            # selector = best_model.named_steps.get('selector')
 
-            mlflow.log_param(
-                "feature_selection",
-                type(selector).__name__ if selector else "None"
-            )
+            # mlflow.log_param(
+            #     "feature_selection",
+            #     type(selector).__name__ if selector else "None"
+            # )
 
-            if hasattr(selector, 'k'):
-                mlflow.log_param("n_features_selected", selector.k)
+            # if hasattr(selector, 'k'):
+            #     mlflow.log_param("n_features_selected", selector.k)
 
-            y_proba_test = best_model.predict_proba(X_test)[:, 1]
+            # y_proba_test = best_model.predict_proba(X_test)[:, 1]
 
-            y_pred_test = (y_proba_test >= best_threshold).astype(int)
+            # y_pred_test = (y_proba_test >= best_threshold).astype(int)
+            y_pred_test = best_model.predict(X_test)
             test_f1 = f1_score(y_test, y_pred_test)
 
             report_test = classification_report(y_test, y_pred_test, output_dict=True)
@@ -219,8 +228,14 @@ pipelines = {
         #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', RandomForestClassifier(random_state=seed))
     ]),
-    
+
     'rf-oversample': ImbPipeline([
+        ('sampler', RandomOverSampler(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', RandomForestClassifier(random_state=seed))
+    ]),
+    
+    'rf-smote': ImbPipeline([
         ('sampler', SMOTE(random_state=seed)),
         #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', RandomForestClassifier(random_state=seed))
@@ -234,11 +249,19 @@ pipelines = {
 }
 
 # Grid de parâmetros
-rfc_grid = {
+rfc_bayes = {
     'classifier__max_depth': Integer(5, 10),
     'classifier__bootstrap': Categorical([True, False]),
     'classifier__criterion': Categorical(["gini", "entropy"]),
     'classifier__n_estimators': Integer(100, 300),
+    #'selector__k': Integer(10, 40)
+}
+
+rfc_grid = {
+    'classifier__max_depth': [5,6,7,8,9,10],
+    'classifier__bootstrap': [True, False],
+    'classifier__criterion': ["gini", "entropy"],
+    'classifier__n_estimators': [100, 200, 300],
     #'selector__k': Integer(10, 40)
 }
 
@@ -254,8 +277,6 @@ pos = (y_train == 1).sum()
 
 ratio = neg / pos
 
-print(ratio)
-
 pipelines = {
     'xgb-scale-pos-weight': ImbPipeline([
         ('classifier', XGBClassifier(booster='gbtree', scale_pos_weight=ratio, verbosity=0, random_state=seed))
@@ -266,8 +287,14 @@ pipelines = {
         #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', XGBClassifier(booster='gbtree', verbosity=0, random_state=seed))
     ]),
-    
+
     'xgb_oversample': ImbPipeline([
+        ('sampler', RandomOverSampler(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', XGBClassifier(booster='gbtree', verbosity=0, random_state=seed))
+    ]),
+    
+    'xgb_smote': ImbPipeline([
         ('sampler', SMOTE(random_state=seed)),
         #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', XGBClassifier(booster='gbtree', verbosity=0, random_state=seed))
@@ -281,10 +308,17 @@ pipelines = {
 }
 
 # Grid de parâmetros
-xgb_grid = {
+xgb_bayes = {
     'classifier__learning_rate': Real(0.01, 0.5, prior='log-uniform'),
     'classifier__max_depth': Integer(3, 10),
     'classifier__n_estimators': Integer(100, 500),
+    #'selector__k': Integer(10, 40)
+}
+
+xgb_grid = {
+    'classifier__learning_rate': [0.01, 0.05, 0.1, 0.2, 0.3, 0.5],
+    'classifier__max_depth': [3, 4, 5, 6, 7, 8, 9, 10],
+    'classifier__n_estimators': [100, 200, 300, 400, 500],
     #'selector__k': Integer(10, 40)
 }
 
@@ -293,13 +327,24 @@ xgb_results = pipeline(xgb_grid, pipelines, X_train, y_train, X_test, y_test, X_
 "============ Pipeline Gradient Boosting =============="""
 
 pipelines = {
+    'gb_baseline': ImbPipeline([
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', GradientBoostingClassifier(random_state=seed))
+    ]),
+
+    'gb_oversample': ImbPipeline([
+        ('sampler', RandomOverSampler(random_state=seed)),
+        #('selector', SelectKBest(score_func=f_classif)),
+        ('classifier', GradientBoostingClassifier(random_state=seed))
+    ]),
+
     'gb_undersample': ImbPipeline([
         ('sampler', RandomUnderSampler(random_state=seed)),
         #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', GradientBoostingClassifier(random_state=seed))
     ]),
 
-    'gb_oversample': ImbPipeline([
+    'gb_smote': ImbPipeline([
         ('sampler', SMOTE(random_state=seed)),
         #('selector', SelectKBest(score_func=f_classif)),
         ('classifier', GradientBoostingClassifier(random_state=seed))
@@ -313,10 +358,18 @@ pipelines = {
 }
 
 # Grid de parâmetros
-gb_grid= {
+gb_bayes= {
     'classifier__learning_rate': Real(0.1, 1.0, prior='log-uniform'),
     'classifier__max_depth': Integer(3, 10),
     'classifier__n_estimators': Integer(100, 500),
+
+    #'selector__k': Integer(10, 40)
+}
+
+gb_grid= {
+    'classifier__learning_rate': [0.1, 0.2, 0.3, 0.5, 0.7, 1.0],
+    'classifier__max_depth': [3, 4, 5, 6, 7, 8, 9, 10],
+    'classifier__n_estimators': [100, 200, 300, 400, 500],
 
     #'selector__k': Integer(10, 40)
 }

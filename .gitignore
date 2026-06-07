@@ -3,3 +3,6 @@ venv
 Classificador/mlartifacts/*
 mlflow.db
 Classificador/mlflow.db
+classifiers/mlartifacts/*
+classifiers/mlruns/*
+classifiers/mlflow.db
