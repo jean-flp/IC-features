@@ -29,7 +29,8 @@ import mlflow
 from  dotenv import load_dotenv
 
 load_dotenv()
-__SEED__ = os.getenv("__SEED__")
+__SEED__ = int(os.getenv("SEED"))
+__TEST_SIZE__ = float(os.getenv("TESTE_SIZE"))
 
 
 
@@ -58,9 +59,9 @@ df = pd.concat([df_cel, df_sce, df_dme], ignore_index=True)
 X = df.drop(['Locus','IsEssential', 'Sequence'], axis=1)
 
 y = df['IsEssential']
-test_size = 0.2
+
 X_train, X_test, y_train, y_test = train_test_split(X, y, 
-                                                    test_size=test_size, 
+                                                    test_size=__TEST_SIZE__, 
                                                     random_state=__SEED__, 
                                                     stratify=y)
 # Dados mansoni
