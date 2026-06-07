@@ -16,7 +16,8 @@ import gc
 
 load_dotenv()
 __HF_KEY_TOKEN__ = os.getenv("HF_KEY_TOKEN")
-__SEED__ = os.getenv("__SEED__")
+__SEED__ = int(os.getenv("SEED"))
+__TEST_SIZE__ = float(os.getenv("TESTE_SIZE"))
 #print(__HF_KEY_TOKEN__)
 
 login(__HF_KEY_TOKEN__)
@@ -246,7 +247,7 @@ for k, model_name in models_name.items():
         pca_mus = df_mus.drop(columns=["protein_id"]).values
         pca_org_modelos = df_org_modelos.drop(columns=["protein_id"]).values
 
-        data_to_fit,_ = train_test_split(pca_org_modelos,random_state=__SEED__,test_size=0.2)
+        data_to_fit,_ = train_test_split(pca_org_modelos,random_state=__SEED__,test_size=__TEST_SIZE__)
 
         scaler = StandardScaler()
         scaler_fit = scaler.fit(data_to_fit)

@@ -26,6 +26,7 @@ dict_df = {}
 for root, dirs, files in os.walk(path_data_processed):
 
     # ignorar pasta específica
+    # FEAT: IGNORAR ARQUIVOS ESPECIFICOS TAMBÉM A PARTIR DE UMA ESTRUTURA DE DADOS
     if "synthesize_features" in root:
         continue
 
