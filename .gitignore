@@ -1,4 +1,5 @@
 venv
+venv381
 .env
 Classificador/mlartifacts/*
 mlflow.db
@@ -6,3 +7,4 @@ Classificador/mlflow.db
 classifiers/mlartifacts/*
 classifiers/mlruns/*
 classifiers/mlflow.db
+data/processed/embeddings/sequence/esm/global.embedding.esm.tsv
