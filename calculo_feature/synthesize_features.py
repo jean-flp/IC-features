@@ -16,58 +16,18 @@ final_path = os.path.join(
     path_data_processed,
     'synthesized'
 )
+print(calculo_feature_dir)
+print(path_data_processed)
+print(final_path)
 
 #%%
 dict_df = {}
 
-#%%
-# percorre TODAS as pastas e subpastas
-
-for root, dirs, files in os.walk(path_data_processed):
-
-    # ignorar pasta específica
-    # FEAT: IGNORAR ARQUIVOS ESPECIFICOS TAMBÉM A PARTIR DE UMA ESTRUTURA DE DADOS
-    if "synthesize_features" in root:
-        continue
-
-    for file in files:
-
-        # pega apenas TSV
-        if file.endswith(".tsv"):
-
-            file_path = os.path.join(root, file)
-
-            print(f"\nARQUIVO ENCONTRADO:\n{file_path}")
-
-            try:
-
-                df = pd.read_csv(
-                    file_path,
-                    sep=None,
-                    engine='python'
-                )
-
-                # nome da chave
-                key_name = os.path.splitext(file)[0]
-
-                dict_df[key_name] = df
-
-                print(f"DataFrame carregado: {key_name}")
-                print(f"Shape: {df.shape}")
-                print(f"Colunas: {df.columns.tolist()}")
-
-            except Exception as e:
-
-                print(f"Erro ao carregar {file_path}")
-                print(e)
-
-#%%
-seconds_end = time.time()
-
-print(
-    f"\nTempo total: "
-    f"{seconds_end - seconds_ini:.2f} segundos"
-)
+arquivos_ignorados = {
+    "global.embedding.esm.tsv",
+    "global.embedding.prot.tsv",
+    "global.embedding.proteinbert.tsv"
+}
 
 #%%
 dict_organismo = {
@@ -91,8 +51,123 @@ dict_features_merged = {
 possible_keys = [
     'GeneID',
     'Protein_key',
-    'Locus'
+    'Locus',
+    'protein_id'
 ]
+
+#%%
+def is_all_embedding_file(file_name: str) -> bool:
+
+    file_name = file_name.lower()
+
+    return (
+        file_name.startswith("all.")
+        and ".embedding.pca." in file_name
+        and (
+            ".esm" in file_name
+            or ".prot" in file_name
+            or ".proteinbert" in file_name
+        )
+    )
+
+#%%
+def split_embedding_by_organism(df):
+
+    """
+    Divide embeddings ALL em dataframes separados por organismo.
+
+    Exemplo:
+    protein_id = 6183.xxx -> organismo 6183
+    protein_id = 10090.xxx -> organismo 10090
+    """
+
+    if "protein_id" not in df.columns:
+        return {}
+
+    result = {}
+
+    for organism_id in dict_organismo.keys():
+
+        mask = (
+            df["protein_id"]
+            .astype(str)
+            .str.startswith(f"{organism_id}.")
+        )
+
+        df_org = df.loc[mask].copy()
+
+        if len(df_org) > 0:
+            result[organism_id] = df_org
+
+    return result
+
+#%%
+# percorre TODAS as pastas e subpastas
+
+for root, dirs, files in os.walk(path_data_processed):
+
+    # ignorar pasta específica
+    # FEAT: IGNORAR ARQUIVOS ESPECIFICOS TAMBÉM A PARTIR DE UMA ESTRUTURA DE DADOS
+    if "synthesize_features" in root:
+        continue
+
+    for file in files:
+
+        # pega apenas TSV
+        if file.endswith(".tsv") and file not in arquivos_ignorados:
+
+            file_path = os.path.join(root, file)
+
+            print(f"\nARQUIVO ENCONTRADO:\n{file_path}")
+
+            try:
+
+                df = pd.read_csv(
+                    file_path,
+                    sep=None,
+                    engine='python'
+                )
+
+                key_name = os.path.splitext(file)[0]
+
+                # nome da chave
+                if is_all_embedding_file(file):
+
+                    dfs_por_organismo = split_embedding_by_organism(df)
+
+                    for organism_id, df_org in dfs_por_organismo.items():
+
+                        new_key = f"{key_name}.{organism_id}"
+
+                        dict_df[new_key] = df_org
+
+                        print(
+                            f"Embedding ALL particionado "
+                            f"para organismo {organism_id} "
+                            f"-> shape {df_org.shape}"
+                        )
+
+                else:
+
+                    dict_df[key_name] = df
+
+                print(f"DataFrame carregado: {key_name}")
+                print(f"Shape: {df.shape}")
+                print(f"Colunas: {df.columns.tolist()}")
+
+            except Exception as e:
+
+                print(f"Erro ao carregar {file_path}")
+                print(e)
+
+#%%
+seconds_end = time.time()
+
+print(
+    f"\nTempo total: "
+    f"{seconds_end - seconds_ini:.2f} segundos"
+)
+
 
 #%%
 def create_merge_key(df):
@@ -134,7 +209,10 @@ for k, v in dict_df.items():
 
     for organism_id in dict_organismo.keys():
 
-        if organism_id in k:
+        if (
+            k.startswith(f"{organism_id}.")
+            or f".{organism_id}" in k
+        ):
 
             organism_found = organism_id
             break

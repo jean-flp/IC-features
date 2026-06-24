@@ -16,8 +16,19 @@ import torch
 import torch.nn.functional as F
 import os
 import re
+import sys
 from dotenv import load_dotenv
-from sklearn.model_selection import train_test_split
+
+project_root = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../..")
+)
+print(project_root)
+
+sys.path.append(project_root)
+from calculo_feature.synthesizeUtils import train_test_between_files
+
+__X_TRAIN__, __X_TEST__, __Y_TRAIN__, __Y_TEST__ = train_test_between_files()
+sys.path.remove(project_root)
 
 load_dotenv()
 __SEED__ = os.getenv("__SEED__")
@@ -208,7 +219,15 @@ for pasta in pastas:
             normalize=False
         )
 
-        df_temp = pd.DataFrame(embeddings.cpu().numpy())
+        embedding_dim = embeddings.shape[1]
+
+        colunas_embedding = [
+            f"proteinbert_{i}"
+            for i in range(embedding_dim)
+        ]
+
+
+        df_temp = pd.DataFrame(embeddings.cpu().numpy(), columns=colunas_embedding)
         df_temp.insert(0, "protein_id", list(bucket["data"]["protein_id"])[:len(df_temp)])
 
         df_embeddings_sentence = pd.concat(
@@ -227,17 +246,20 @@ pca_man = df_man.drop(columns=["protein_id"]).values
 pca_mus = df_mus.drop(columns=["protein_id"]).values
 pca_org_modelos = df_org_modelos.drop(columns=["protein_id"]).values
 
-data_to_fit, _ = train_test_split(pca_org_modelos,random_state=__SEED__,test_size=0.2)
+#Filter proteins
+X_train, X_test, y_train, y_test = (__X_TRAIN__, __X_TEST__, __Y_TRAIN__, __Y_TEST__)
+
+data_to_fit = df_org_modelos[df_org_modelos["protein_id"].isin(X_train["protein_id"])]
 
 scaler = StandardScaler()
 
-scaler_fit = scaler.fit(data_to_fit)
+scaler_fit = scaler.fit(data_to_fit.drop(columns=["protein_id"]).values)
 
 pca_org_modelos_stand = scaler_fit.transform(pca_org_modelos)
 pca_man_stand = scaler_fit.transform(pca_man)
 pca_mus_stand = scaler_fit.transform(pca_mus)
 
-pca_data_fit = scaler_fit.transform(data_to_fit)
+pca_data_fit = scaler_fit.transform(data_to_fit.drop(columns=["protein_id"]).values)
 
 pca_calc = PCA(n_components=0.95, random_state=__SEED__)
 pca_calc_fit = pca_calc.fit(pca_data_fit)
@@ -246,9 +268,17 @@ pca_fin_org = pca_calc_fit.transform(pca_org_modelos_stand)
 pca_fin_man = pca_calc_fit.transform(pca_man_stand)
 pca_fin_mus = pca_calc_fit.transform(pca_mus_stand)
 
-df_pos_pca_org =  pd.DataFrame(pca_fin_org)
-df_pos_pca_man =  pd.DataFrame(pca_fin_man)
-df_pos_pca_mus =  pd.DataFrame(pca_fin_mus)
+#renomeando as colunas
+n_components_final = pca_fin_org.shape[1]
+
+colunas_pca = [
+    f"proteinbert_pca_{i}"
+    for i in range(n_components_final)
+]
+
+df_pos_pca_org =  pd.DataFrame(pca_fin_org, columns=colunas_pca)
+df_pos_pca_man =  pd.DataFrame(pca_fin_man, columns=colunas_pca)
+df_pos_pca_mus =  pd.DataFrame(pca_fin_mus, columns=colunas_pca)
 
 df_pos_pca_org.insert(0,"protein_id",list(df_org_modelos["protein_id"]))
 df_pos_pca_man.insert(0,"protein_id",list(df_man["protein_id"]))
@@ -277,4 +307,3 @@ df_pos_pca_org.to_csv(nome_arquivo_final_pca_global_org,sep=' ',index=False)
 df_pos_pca_man.to_csv(nome_arquivo_final_pca_global_man,sep=' ',index=False)
 df_pos_pca_mus.to_csv(nome_arquivo_final_pca_global_mus,sep=' ',index=False)
 df_embeddings_sentence.to_csv(nome_arquivo_final_global,sep=' ',index=False)
-# %%

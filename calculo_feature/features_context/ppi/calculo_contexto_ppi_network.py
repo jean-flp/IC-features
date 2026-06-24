@@ -158,96 +158,95 @@ def topology_potential(graph, sigma=0.9428):
 
 #%%
 for organismo in os.listdir(path_data_raw):
-    if organismo == 'dme':
-        pasta_organismo = os.path.join(path_data_raw, organismo)
-        nome_arquivo = os.listdir(pasta_organismo)[0]
-        path_arquivo = os.path.join(pasta_organismo, nome_arquivo)
+    pasta_organismo = os.path.join(path_data_raw, organismo)
+    nome_arquivo = os.listdir(pasta_organismo)[0]
+    path_arquivo = os.path.join(pasta_organismo, nome_arquivo)
 
-        data = pd.read_csv(path_arquivo, sep=" ")
+    data = pd.read_csv(path_arquivo, sep=" ")
 
-        protein_map = {
-            v: k for k, v in enumerate(
-                set(data["protein1"]).union(set(data["protein2"]))
-            )
-        }
-
-        protein_interaction_masked = mapProtein(data, protein_map)
-        graph = generateGraph(protein_interaction_masked)
-
-        df_graph = generateDF(graph)
-
-        # Centralidades básicas
-        degree = nx.degree_centrality(graph)
-        eigenvector = nx.eigenvector_centrality(graph)
-        betweenness = nx.betweenness_centrality(graph, k=380)
-        clustering = nx.clustering(graph)
-
-        # Closeness
-        closeness = {}
-        for i in range(len(protein_map)):
-            closeness[i] = nx.closeness_centrality(graph, u=i)
-
-        # Features custom
-        lac = local_average_connectivity(graph)
-        print(f'Terminou LAC do {organismo}')
-
-        nc = edge_clustering_coefficient(graph)
-        print(f'Terminou NC do {organismo}')
-
-        dmnc_values = dmnc(graph)  # ✅ corrigido aqui
-        print(f'Terminou DMNC do {organismo}')
-
-        tp = topology_potential(graph)
-        print(f'Terminou tp do {organismo}')
-
-        # Ordenação
-        degree_ordered = OrderedDict(sorted(degree.items()))
-        eigenvector_ordered = OrderedDict(sorted(eigenvector.items()))
-        betweenness_ordered = OrderedDict(sorted(betweenness.items()))
-        closeness_ordered = OrderedDict(sorted(closeness.items()))
-        clustering_ordered = OrderedDict(sorted(clustering.items()))
-        lac_ordered = OrderedDict(sorted(lac.items()))
-        nc_ordered = OrderedDict(sorted(nc.items()))
-        dmnc_ordered = OrderedDict(sorted(dmnc_values.items()))  # ✅ corrigido
-        tp_ordered = OrderedDict(sorted(tp.items()))
-
-        # DataFrame final
-        protein_features = pd.concat([
-            pd.Series(list(protein_map.keys())),
-            pd.Series(list(degree_ordered.values())),
-            pd.Series(list(eigenvector_ordered.values())),
-            pd.Series(list(betweenness_ordered.values())),
-            pd.Series(list(closeness_ordered.values())),
-            pd.Series(list(lac_ordered.values())),
-            pd.Series(list(nc_ordered.values())),
-            pd.Series(list(dmnc_ordered.values())),
-            pd.Series(list(tp_ordered.values())),
-            pd.Series(list(clustering_ordered.values()))
-        ], axis=1)
-
-        protein_features.columns = [
-            "Protein_key",
-            "DegreeCentrality",
-            "EigenvectorCentrality",
-            "BetweennessCentrality",
-            "ClosenessCentrality",
-            "LocalAverageConnectivity",
-            "NC",
-            "DMNC",
-            "TP",
-            "Clustering"
-        ]
-
-        nome_arquivo_destino = nome_arquivo.strip('.txt')
-
-        path_result = os.path.abspath(
-            os.path.join(
-                path_data_processed,
-                f'feature.contexto.network.{organismo}.{nome_arquivo_destino}.tsv'
-            )
+    protein_map = {
+        v: k for k, v in enumerate(
+            set(data["protein1"]).union(set(data["protein2"]))
         )
+    }
 
-        protein_features.to_csv(path_result, sep=' ', index=False)
+    protein_interaction_masked = mapProtein(data, protein_map)
+    graph = generateGraph(protein_interaction_masked)
+
+    df_graph = generateDF(graph)
+
+    # Centralidades básicas
+    degree = nx.degree_centrality(graph)
+    eigenvector = nx.eigenvector_centrality(graph)
+    betweenness = nx.betweenness_centrality(graph, k=380)
+    clustering = nx.clustering(graph)
+
+    # Closeness
+    closeness = {}
+    for i in range(len(protein_map)):
+        closeness[i] = nx.closeness_centrality(graph, u=i)
+
+    # Features custom
+    lac = local_average_connectivity(graph)
+    print(f'Terminou LAC do {organismo}')
+
+    nc = edge_clustering_coefficient(graph)
+    print(f'Terminou NC do {organismo}')
+
+    dmnc_values = dmnc(graph)  # ✅ corrigido aqui
+    print(f'Terminou DMNC do {organismo}')
+
+    tp = topology_potential(graph)
+    print(f'Terminou tp do {organismo}')
+
+    # Ordenação
+    degree_ordered = OrderedDict(sorted(degree.items()))
+    eigenvector_ordered = OrderedDict(sorted(eigenvector.items()))
+    betweenness_ordered = OrderedDict(sorted(betweenness.items()))
+    closeness_ordered = OrderedDict(sorted(closeness.items()))
+    clustering_ordered = OrderedDict(sorted(clustering.items()))
+    lac_ordered = OrderedDict(sorted(lac.items()))
+    nc_ordered = OrderedDict(sorted(nc.items()))
+    dmnc_ordered = OrderedDict(sorted(dmnc_values.items()))  # ✅ corrigido
+    tp_ordered = OrderedDict(sorted(tp.items()))
+
+    # DataFrame final
+    protein_features = pd.concat([
+        pd.Series(list(protein_map.keys())),
+        pd.Series(list(degree_ordered.values())),
+        pd.Series(list(eigenvector_ordered.values())),
+        pd.Series(list(betweenness_ordered.values())),
+        pd.Series(list(closeness_ordered.values())),
+        pd.Series(list(lac_ordered.values())),
+        pd.Series(list(nc_ordered.values())),
+        pd.Series(list(dmnc_ordered.values())),
+        pd.Series(list(tp_ordered.values())),
+        pd.Series(list(clustering_ordered.values()))
+    ], axis=1)
+
+    protein_features.columns = [
+        "Protein_key",
+        "DegreeCentrality",
+        "EigenvectorCentrality",
+        "BetweennessCentrality",
+        "ClosenessCentrality",
+        "LocalAverageConnectivity",
+        "NC",
+        "DMNC",
+        "TP",
+        "Clustering"
+    ]
+
+    nome_arquivo_destino = nome_arquivo.strip('.txt')
+
+    path_result = os.path.abspath(
+        os.path.join(
+            path_data_processed,
+            f'feature.contexto.network.{organismo}.{nome_arquivo_destino}.tsv'
+        )
+    )
+
+    protein_features.to_csv(path_result, sep=' ', index=False)
 
 #%%
 seconds_fini = time.time()

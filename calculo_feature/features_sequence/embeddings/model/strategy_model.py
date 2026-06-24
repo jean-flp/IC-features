@@ -6,7 +6,7 @@ import torch
 import gc
 
 model_dict = {
-    "facebook/esm2_t36_3B_UR50D":Esm, #"facebook/esm2_t36_3B_UR50D": Esm,
+    "facebook/esm2_t33_650M_UR50D":Esm, #"facebook/esm2_t36_3B_UR50D": Esm,
     "Rostlab/prot_t5_xl_uniref50": ProteinT5
 }
 

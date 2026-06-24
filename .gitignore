@@ -1,7 +1,13 @@
+.venv
 venv
 venv381
+venv312
+.venv-linux
+venv_node2vec
 .env
 Classificador/mlartifacts/*
 mlflow.db
 Classificador/mlflow.db
 data/processed/embeddings/sequence/esm/global.embedding.esm.tsv
+data/processed/embeddings/sequence/prot/global.embedding.prot.tsv
+data/processed/embeddings/sequence/proteinbert/global.embedding.proteinbert.tsv

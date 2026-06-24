@@ -1,5 +1,5 @@
 #%%
-from sklearn.model_selection import train_test_split
+import sys
 import torch
 from model.strategy_model import ModelContext
 from huggingface_hub import login
@@ -12,13 +12,24 @@ import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
+
+project_root = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../..")
+)
+print(project_root)
+
+sys.path.append(project_root)
+from calculo_feature.synthesizeUtils import train_test_between_files
+
+__X_TRAIN__, __X_TEST__, __Y_TRAIN__, __Y_TEST__ = train_test_between_files()
+sys.path.remove(project_root)
+
 import gc
 
 load_dotenv()
 __HF_KEY_TOKEN__ = os.getenv("HF_KEY_TOKEN")
 __SEED__ = int(os.getenv("SEED"))
 __TEST_SIZE__ = float(os.getenv("TESTE_SIZE"))
-#print(__HF_KEY_TOKEN__)
 
 login(__HF_KEY_TOKEN__)
 
@@ -52,7 +63,7 @@ print(path_data_raw)
 print(device)
 #%%
 models_name = {
-    "esm":"facebook/esm2_t36_3B_UR50D",#Pytorch
+    "esm":"facebook/esm2_t33_650M_UR50D",#Pytorch
     "prot":"Rostlab/prot_t5_xl_uniref50" #Pytorch
 }
 #Models 
@@ -211,7 +222,15 @@ for k, model_name in models_name.items():
                     if torch.is_tensor(embeddings):
                         embeddings = embeddings.detach().cpu().numpy()
 
-                    df_temp = pd.DataFrame(embeddings)
+                    embedding_dim = embeddings.shape[1]
+
+                    colunas_embedding = [
+                        f"{k}_{i}"
+                        for i in range(embedding_dim)
+                    ]
+
+
+                    df_temp = pd.DataFrame(embeddings,columns=colunas_embedding)
                     df_temp.insert(0, "protein_id", batch_ids)
 
                     embeddings_list.append(df_temp)
@@ -247,16 +266,19 @@ for k, model_name in models_name.items():
         pca_mus = df_mus.drop(columns=["protein_id"]).values
         pca_org_modelos = df_org_modelos.drop(columns=["protein_id"]).values
 
-        data_to_fit,_ = train_test_split(pca_org_modelos,random_state=__SEED__,test_size=__TEST_SIZE__)
+        #Filter proteins
+        X_train, X_test, y_train, y_test = (__X_TRAIN__, __X_TEST__, __Y_TRAIN__, __Y_TEST__)
+
+        data_to_fit = df_org_modelos[df_org_modelos["protein_id"].isin(X_train["protein_id"])]
 
         scaler = StandardScaler()
-        scaler_fit = scaler.fit(data_to_fit)
+        scaler_fit = scaler.fit(data_to_fit.drop(columns=["protein_id"]).values)
 
         pca_org_modelos_stand = scaler_fit.transform(pca_org_modelos)
         pca_man_stand = scaler_fit.transform(pca_man)
         pca_mus_stand = scaler_fit.transform(pca_mus)
 
-        pca_data_fit  = scaler_fit.transform(data_to_fit) 
+        pca_data_fit  = scaler_fit.transform(data_to_fit.drop(columns=["protein_id"]).values) 
 
         pca_calc = PCA(n_components=0.95, random_state=__SEED__)
         pca_calc_fit = pca_calc.fit(pca_data_fit)
@@ -265,9 +287,17 @@ for k, model_name in models_name.items():
         pca_fin_man = pca_calc_fit.transform(pca_man_stand)
         pca_fin_mus = pca_calc_fit.transform(pca_mus_stand)
 
-        df_pos_pca_org = pd.DataFrame(pca_fin_org)
-        df_pos_pca_man = pd.DataFrame(pca_fin_man)
-        df_pos_pca_mus = pd.DataFrame(pca_fin_mus)
+        #renomeando as colunas
+        n_components_final = pca_fin_org.shape[1]
+
+        colunas_pca = [
+            f"{k}_pca_{i}"
+            for i in range(n_components_final)
+        ]
+
+        df_pos_pca_org = pd.DataFrame(pca_fin_org, columns=colunas_pca)
+        df_pos_pca_man = pd.DataFrame(pca_fin_man, columns=colunas_pca)
+        df_pos_pca_mus = pd.DataFrame(pca_fin_mus, columns=colunas_pca)
 
         df_pos_pca_org.insert(0, "protein_id", list(df_org_modelos["protein_id"]))
         df_pos_pca_man.insert(0, "protein_id", list(df_man["protein_id"]))

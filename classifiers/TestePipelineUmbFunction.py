@@ -19,14 +19,27 @@ from sklearn.ensemble import RandomForestClassifier
 
 from sklearn.feature_selection import RFE, SelectKBest, f_classif, VarianceThreshold, SelectFromModel
 
-from skopt import BayesSearchCV
-from skopt.space import Real, Integer, Categorical
+# from skopt import BayesSearchCV
+# from skopt.space import Real, Integer, Categorical
 
 import os
 from tqdm import tqdm
 
-import mlflow
+#import mlflow
 from  dotenv import load_dotenv
+import sys
+
+project_root = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../..")
+)
+print(project_root)
+
+sys.path.append(project_root)
+from calculo_feature.synthesizeUtils import train_test_between_files
+
+__X_TRAIN__, __X_TEST__, __Y_TRAIN__, __Y_TEST__ = train_test_between_files()
+sys.path.remove(project_root)
+
 
 load_dotenv()
 __SEED__ = int(os.getenv("SEED"))
@@ -60,10 +73,13 @@ X = df.drop(['Locus','IsEssential', 'Sequence'], axis=1)
 
 y = df['IsEssential']
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, 
-                                                    test_size=__TEST_SIZE__, 
-                                                    random_state=__SEED__, 
-                                                    stratify=y)
+# X_train, X_test, y_train, y_test = train_test_split(X, y, 
+#                                                     test_size=__TEST_SIZE__, 
+#                                                     random_state=__SEED__, 
+#                                                     stratify=y)
+
+X_train, X_test, y_train, y_test = __X_TRAIN__, __X_TEST__, __Y_TRAIN__, __Y_TEST__ 
+
 # Dados mansoni
 df_mansoni = df_man.set_index('Locus')
 X_mansoni = df_mansoni.drop(['Sequence'], axis=1)
