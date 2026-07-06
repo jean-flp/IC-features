@@ -14,3 +14,4 @@ data/processed/embeddings/sequence/proteinbert/global.embedding.proteinbert.tsv
 classifiers/mlartifacts/*
 classifiers/mlruns/*
 classifiers/mlflow.db
+mlflow_config/mlflow.db

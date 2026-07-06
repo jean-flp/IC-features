@@ -117,14 +117,14 @@ def train_test_between_files():
     )
 
     X = merged_df[["protein_id"]]
-    y = merged_df["essential"]
+    y = merged_df[["protein_id", "essential"]]
 
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
         test_size=test_size,
         random_state=seed,
-        stratify=y
+        stratify=y["essential"]
     )
 
-    return X_train, X_test, y_train, y_test
+    return X_train.reset_index(drop=True), X_test.reset_index(drop=True), y_train.reset_index(drop=True), y_test.reset_index(drop=True)
