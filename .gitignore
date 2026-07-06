@@ -15,3 +15,4 @@ classifiers/mlartifacts/*
 classifiers/mlruns/*
 classifiers/mlflow.db
 mlflow_config/mlflow.db
+mlflow_config/mlartifacts/*
