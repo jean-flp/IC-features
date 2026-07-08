@@ -26,6 +26,8 @@ from pathlib import Path
 import os
 from tqdm import tqdm
 
+import json
+
 import mlflow
 from  dotenv import load_dotenv
 import sys
@@ -103,7 +105,7 @@ X_musculus = df_musculus.drop(["Locus","essential","Sequence","protein_id"],axis
 y_musculus = df_musculus['essential']
 
 #%%
-sequence_embedding_model = 'protein_bert'
+sequence_embedding_model = 'none'
 
 if sequence_embedding_model == 'esm':
     X_train = X_train.drop(columns=[col for col in X_train.columns if "proteinbert_pca" in col or "prot_pca" in col])
@@ -125,6 +127,13 @@ elif sequence_embedding_model == 'prot':
 
     X_mansoni = X_mansoni.drop(columns=[col for col in X_mansoni.columns if "proteinbert_pca" in col or "esm_pca" in col])
     X_musculus = X_musculus.drop(columns=[col for col in X_musculus.columns if "proteinbert_pca" in col or "esm_pca" in col])
+else:
+    X_train = X_train.drop(columns=[col for col in X_train.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col ])
+    X_test = X_test.drop(columns=[col for col in X_test.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col])
+
+    X_mansoni = X_mansoni.drop(columns=[col for col in X_mansoni.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col])
+    X_musculus = X_musculus.drop(columns=[col for col in X_musculus.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col])
+    
 
 
 #%%
@@ -229,14 +238,16 @@ pipelines_xgb = {
 
 
 # pipeline com GridSearch
+# search_strategies: grid, optuna(bayes) e randomized
 runner = PipelineRunner(
     cv=5,
     scoring="roc_auc",
-    search_strategy="grid",
+    search_strategy="optuna",
     seed=__SEED__
 
 )
-runner.run(
+#%%
+runners_results_random_forest = runner.run(
     model_name="random_forest",
     pipelines=pipelines_rf,
     X_train=X_train,
@@ -246,8 +257,11 @@ runner.run(
     X_external=X_musculus,
     y_external=y_musculus
 )
-
-runner.run(
+# #%%
+# with open("random_forest_results_output.json", "w", encoding="utf-8") as file:
+#     json.dump(runners_results_random_forest, file, indent=4, sort_keys=True)
+#%%
+runners_results_gradient_boosting = runner.run(
     model_name="gradient_boosting",
     pipelines=pipelines_gb,
     X_train=X_train,
@@ -257,8 +271,12 @@ runner.run(
     X_external=X_musculus,
     y_external=y_musculus
 )
+# #%%
+# with open("gradient_boosting_results_output.json", "w", encoding="utf-8") as file:
+#     json.dump(runners_results_gradient_boosting, file, indent=4, sort_keys=True)
 
-runner.run(
+
+runners_results_xgboost = runner.run(
     model_name="xgboost",
     pipelines=pipelines_xgb,
     X_train=X_train,
@@ -269,6 +287,10 @@ runner.run(
     y_external=y_musculus
 )
 
+# with open("xgboost_results_output.json", "w", encoding="utf-8") as file:
+#     json.dump(runners_results_xgboost, file, indent=4, sort_keys=True)
+
+
 #%%
 """ Carregando os melhores modelos dos tipos de classificadores """
 # Os melhores modelos de cada tipo de classificador foram salvos e agora serão utilizados para predizer o mus musculus, então com esses resultados será feitas a interseção e por fim as métricas dos resultados
@@ -276,28 +298,28 @@ runner.run(
 
 
 
-print("\n" + "="*70)
-print("PREDIÇÕES NO MUS MUSCULUS")
-print("="*70)
+# print("\n" + "="*70)
+# print("PREDIÇÕES NO MUS MUSCULUS")
+# print("="*70)
 
-# Predições de cada modelo
-predictions_musculus = {}
+# # Predições de cada modelo
+# predictions_musculus = {}
 
-for model_type, info in best_models.items():
-    model = info['model']
-    model_name = info['name']
+# for model_type, info in best_models.items():
+#     model = info['model']
+#     model_name = info['name']
     
-    # Fazer predições
-    y_pred = model.predict(X_musculus)
-    y_proba = model.predict_proba(X_musculus)[:, 1]
+#     # Fazer predições
+#     y_pred = model.predict(X_musculus)
+#     y_proba = model.predict_proba(X_musculus)[:, 1]
     
-    predictions_musculus[model_type] = {
-        'predictions': y_pred,
-        'probabilities': y_proba,
-        'model_name': model_name
-    }
+#     predictions_musculus[model_type] = {
+#         'predictions': y_pred,
+#         'probabilities': y_proba,
+#         'model_name': model_name
+#     }
     
-    # Avaliar
-    print(f"\n{model_type} ({model_name}):")
-    print(f"  Predições positivas: {y_pred.sum()}/{len(y_pred)}")
-    print("\n" + classification_report(y_musculus, y_pred, target_names=['Não-Essencial', 'Essencial']))
+#     # Avaliar
+#     print(f"\n{model_type} ({model_name}):")
+#     print(f"  Predições positivas: {y_pred.sum()}/{len(y_pred)}")
+#     print("\n" + classification_report(y_musculus, y_pred, target_names=['Não-Essencial', 'Essencial']))

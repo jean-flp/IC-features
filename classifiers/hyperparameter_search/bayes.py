@@ -1,6 +1,5 @@
 from hyperparameter_search.optuna_search import OptunaSearch
 from hyperparameter_search.BaseSearch import BaseSearch
-
 class Bayes(BaseSearch):
 
     def create_search(
@@ -11,17 +10,12 @@ class Bayes(BaseSearch):
         scoring,
         seed
     ):
-
-        return OptunaSearch(
-
+        search = OptunaSearch()
+        return search.create_search(
             estimator=estimator,
-
-            search_space=param_space,
-
+            param_space=param_space,
             cv=cv,
-
             scoring=scoring,
-
-            random_state=seed
+            seed=seed,
 
         )
