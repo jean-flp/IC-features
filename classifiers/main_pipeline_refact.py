@@ -51,6 +51,8 @@ sys.path.remove(project_root)
 load_dotenv()
 __SEED__ = int(os.getenv("SEED"))
 __TEST_SIZE__ = float(os.getenv("TESTE_SIZE"))
+ML_FLOW_NPCA_VALUE = os.getenv("ML_FLOW_NPCA_VALUE")
+ML_FLOW_MODEL_VALUE = os.getenv("ML_FLOW_MODEL_VALUE")
 
 #%%
 ## MLFLOW 
@@ -105,36 +107,55 @@ X_musculus = df_musculus.drop(["Locus","essential","Sequence","protein_id"],axis
 y_musculus = df_musculus['essential']
 
 #%%
-sequence_embedding_model = 'none'
+dict_model_value =  ML_FLOW_MODEL_VALUE
+dict_npca_value = ML_FLOW_NPCA_VALUE
 
-if sequence_embedding_model == 'esm':
-    X_train = X_train.drop(columns=[col for col in X_train.columns if "proteinbert_pca" in col or "prot_pca" in col])
-    X_test = X_test.drop(columns=[col for col in X_test.columns if "proteinbert_pca" in col or "prot_pca" in col])
+print(dict_model_value)
+print(dict_npca_value)
 
-    X_mansoni = X_mansoni.drop(columns=[col for col in X_mansoni.columns if "proteinbert_pca" in col or "prot_pca" in col])
-    X_musculus = X_musculus.drop(columns=[col for col in X_musculus.columns if "proteinbert_pca" in col or "prot_pca" in col])
+def filter_columns(df, sequence_model=None, npca=None):
+    cols = []
 
-elif sequence_embedding_model == 'protein_bert':
-    X_train = X_train.drop(columns=[col for col in X_train.columns if "esm_pca" in col or "prot_pca" in col])
-    X_test = X_test.drop(columns=[col for col in X_test.columns if "esm_pca" in col or "prot_pca" in col])
+    for col in df.columns:
+        # Mantém todas as colunas que não são embeddings
 
-    X_mansoni = X_mansoni.drop(columns=[col for col in X_mansoni.columns if "esm_pca" in col or "prot_pca" in col])
-    X_musculus = X_musculus.drop(columns=[col for col in X_musculus.columns if "esm_pca" in col or "prot_pca" in col])
+        if not col.startswith(("proteinbert_", "prot_", "esm_", "node2vec_")):
+            cols.append(col)
+            continue
 
-elif sequence_embedding_model == 'prot':
-    X_train = X_train.drop(columns=[col for col in X_train.columns if "proteinbert_pca" in col or "esm_pca" in col])
-    X_test = X_test.drop(columns=[col for col in X_test.columns if "proteinbert_pca" in col or "esm_pca" in col])
+        # Mantém apenas colunas não-embedding
+        if sequence_model == "no_embedding":
+            continue
+        # Mantém sempre o Node2Vec correspondente ao PCA escolhido
+        if npca is not None and col.startswith(f"node2vec_n{npca}_"):
+            cols.append(col)
+            continue
 
-    X_mansoni = X_mansoni.drop(columns=[col for col in X_mansoni.columns if "proteinbert_pca" in col or "esm_pca" in col])
-    X_musculus = X_musculus.drop(columns=[col for col in X_musculus.columns if "proteinbert_pca" in col or "esm_pca" in col])
-else:
-    X_train = X_train.drop(columns=[col for col in X_train.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col ])
-    X_test = X_test.drop(columns=[col for col in X_test.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col])
+        # Mantém apenas o embedding de sequência escolhido
+        if sequence_model == "proteinbert" and col.startswith(f"proteinbert_n{npca}_"):
+            cols.append(col)
 
-    X_mansoni = X_mansoni.drop(columns=[col for col in X_mansoni.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col])
-    X_musculus = X_musculus.drop(columns=[col for col in X_musculus.columns if "proteinbert_pca" in col or "esm_pca" in col or "prot_pca" in col])
-    
+        elif sequence_model == "prot" and col.startswith(f"prot_n{npca}_"):
+            cols.append(col)
 
+        elif sequence_model == "esm" and col.startswith(f"esm_n{npca}_"):
+            cols.append(col)
+
+    return df[cols]
+
+#%%
+X_train = filter_columns(df=X_train,sequence_model=dict_model_value,npca=dict_npca_value)
+X_test = filter_columns(df=X_test,sequence_model=dict_model_value,npca=dict_npca_value)
+X_mansoni = filter_columns(df=X_mansoni,sequence_model=dict_model_value,npca=dict_npca_value)
+X_musculus = filter_columns(df=X_musculus,sequence_model=dict_model_value,npca=dict_npca_value)
+
+print("Train:", X_train.shape)
+print("Test:", X_test.shape)
+print("Mansoni:", X_mansoni.shape)
+print("Musculus:", X_musculus.shape)
+
+print(set(X_train.columns) - set(X_musculus.columns))
+print(set(X_musculus.columns) - set(X_train.columns))
 
 #%%
 pipelines_rf = {
@@ -271,11 +292,11 @@ runners_results_gradient_boosting = runner.run(
     X_external=X_musculus,
     y_external=y_musculus
 )
-# #%%
+
 # with open("gradient_boosting_results_output.json", "w", encoding="utf-8") as file:
 #     json.dump(runners_results_gradient_boosting, file, indent=4, sort_keys=True)
 
-
+#%%
 runners_results_xgboost = runner.run(
     model_name="xgboost",
     pipelines=pipelines_xgb,
@@ -295,31 +316,3 @@ runners_results_xgboost = runner.run(
 """ Carregando os melhores modelos dos tipos de classificadores """
 # Os melhores modelos de cada tipo de classificador foram salvos e agora serão utilizados para predizer o mus musculus, então com esses resultados será feitas a interseção e por fim as métricas dos resultados
 # Por fim o mesmo será feito no organismo alvo, mansoni
-
-
-
-# print("\n" + "="*70)
-# print("PREDIÇÕES NO MUS MUSCULUS")
-# print("="*70)
-
-# # Predições de cada modelo
-# predictions_musculus = {}
-
-# for model_type, info in best_models.items():
-#     model = info['model']
-#     model_name = info['name']
-    
-#     # Fazer predições
-#     y_pred = model.predict(X_musculus)
-#     y_proba = model.predict_proba(X_musculus)[:, 1]
-    
-#     predictions_musculus[model_type] = {
-#         'predictions': y_pred,
-#         'probabilities': y_proba,
-#         'model_name': model_name
-#     }
-    
-#     # Avaliar
-#     print(f"\n{model_type} ({model_name}):")
-#     print(f"  Predições positivas: {y_pred.sum()}/{len(y_pred)}")
-#     print("\n" + classification_report(y_musculus, y_pred, target_names=['Não-Essencial', 'Essencial']))

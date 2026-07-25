@@ -67,6 +67,7 @@ def is_all_embedding_file(file_name: str) -> bool:
             ".esm" in file_name
             or ".prot" in file_name
             or ".proteinbert" in file_name
+            or ".node2vec" in file_name
         )
     )
 

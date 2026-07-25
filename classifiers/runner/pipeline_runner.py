@@ -2,7 +2,8 @@ from runner.search_engine import SearchEngine
 from runner.metrics_evaluator import MetricsEvaluator
 from runner.mlflow_logger import MLFlowLogger
 from tqdm import tqdm
-
+import mlflow
+import time
 
 class PipelineRunner:
 
@@ -37,66 +38,73 @@ class PipelineRunner:
         results = {}
 
         for name, estimator in tqdm(pipelines.items()):
-            
-            print(f"ESTOU NO PASSO DO SEARCH PARA: {name} e {estimator}")
-            search = self.search_engine.create(
+            with mlflow.start_run(run_name=name):
+                
+                print(f"ESTOU NO PASSO DO SEARCH PARA: {name} e {estimator}")
+                search = self.search_engine.create(
 
-                model_name=model_name,
+                    model_name=model_name,
 
-                strategy=self.search_strategy,
+                    strategy=self.search_strategy,
 
-                estimator=estimator,
+                    estimator=estimator,
 
-                cv=self.cv,
+                    cv=self.cv,
 
-                scoring=self.scoring,
+                    scoring=self.scoring,
 
-                seed=self.seed
+                    seed=self.seed
 
-            )
-            print(f"ESTOU NO PASSO DO fit PARA: {name} e {estimator}")
-            search.fit(
-                X_train,
-                y_train
-            )
-            print(f"ESTOU NO PASSO DO best_model PARA: {name} e {estimator}")
-            best_model = search.best_estimator_
-            print(f"ESTOU NO PASSO DO metrics PARA: {name} e {estimator}")
-            metrics = self.metrics.evaluate(
+                )
+                print(f"ESTOU NO PASSO DO fit PARA: {name} e {estimator}")
+                inicio = time.perf_counter()
 
-                model=best_model,
+                search.fit(
+                    X_train,
+                    y_train
+                )
+                fit_time = time.perf_counter() - inicio 
 
-                X_test=X_test,
+                print(f"ESTOU NO PASSO DO best_model PARA: {name} e {estimator}")
+                best_model = search.best_estimator_
+                print(f"ESTOU NO PASSO DO metrics PARA: {name} e {estimator}")
+                metrics = self.metrics.evaluate(
 
-                y_test=y_test,
+                    model=best_model,
 
-                X_external=X_external,
+                    X_test=X_test,
 
-                y_external=y_external
+                    y_test=y_test,
 
-            )
-            print(f"ESTOU NO PASSO DO mlflow logger PARA: {name} e {estimator}")
-            self.logger.log(
+                    X_external=X_external,
 
-                run_name=name,
+                    y_external=y_external
 
-                search=search,
+                )
+                print(f"ESTOU NO PASSO DO mlflow logger PARA: {name} e {estimator}")
+                self.logger.log(
 
-                model=best_model,
+                    run_name=name,
 
-                metrics=metrics
+                    search=search,
 
-            )
-            print(f"ESTOU NO PASSO Da atribuição results PARA: {name} e {estimator}")
-            results[name] = {
+                    model=best_model,
 
-                "best_model": best_model,
+                    metrics=metrics,
+                    
+                    fit_time=fit_time
 
-                "best_params": search.best_params_,
+                )
+                print(f"ESTOU NO PASSO Da atribuição results PARA: {name} e {estimator}")
+                results[name] = {
 
-                "best_score": search.best_score_,
+                    "best_model": best_model,
 
-                "metrics": metrics
+                    "best_params": search.best_params_,
 
-            }
+                    "best_score": search.best_score_,
+
+                    "metrics": metrics
+
+                }
         return results

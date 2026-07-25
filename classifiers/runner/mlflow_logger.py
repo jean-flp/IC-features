@@ -14,78 +14,101 @@ class MLFlowLogger:
 
         model,
 
-        metrics
+        metrics,
+
+        fit_time
 
     ):
 
-        with mlflow.start_run(run_name=run_name):
+        
 
-            #
-            # parâmetros
-            #
+        #
+        # parâmetros
+        #
 
-            mlflow.log_param(
-                "pipeline_name",
-                run_name
-            )
+        mlflow.log_param(
+            "pipeline_name",
+            run_name
+        )
 
-            mlflow.log_params(
-                search.best_params_
-            )
+        mlflow.log_params(
+            search.best_params_
+        )
+        
+        mlflow.log_metric(
+            "fit_time",
+            fit_time
+        )
 
-            #
-            # sampler
-            #
+        #
+        # sampler
+        #
 
-            sampler = model.named_steps.get("sampler")
+        sampler = model.named_steps.get("sampler")
 
-            mlflow.log_param(
+        mlflow.log_param(
 
-                "sampler",
+            "sampler",
 
-                type(sampler).__name__
+            type(sampler).__name__
 
-                if sampler
+            if sampler
 
-                else "None"
+            else "None"
 
-            )
+        )
 
-            #
-            # classificador
-            #
+        #
+        # classificador
+        #
 
-            classifier = model.named_steps.get(
+        classifier = model.named_steps.get(
 
-                "classifier"
+            "classifier"
 
-            )
+        )
 
-            mlflow.log_param(
+        mlflow.log_param(
 
-                "classifier",
+            "classifier",
 
-                type(classifier).__name__
+            type(classifier).__name__
 
-            )
+        )
 
-            #
-            # CV
-            #
+        #
+        # CV
+        #
+
+        mlflow.log_metric(
+
+            "cv_score",
+
+            search.best_score_
+
+        )
+
+        #
+        # Teste
+        #
+
+        for metric_name, value in metrics["test"].items():
 
             mlflow.log_metric(
 
-                "cv_score",
+                metric_name,
 
-                search.best_score_
+                value
 
             )
 
-            #
-            # Teste
-            #
+        #
+        # Base externa
+        #
 
-            for metric_name, value in metrics["test"].items():
+        if "external" in metrics:
+
+            for metric_name, value in metrics["external"].items():
 
                 mlflow.log_metric(
 
@@ -95,30 +118,14 @@ class MLFlowLogger:
 
                 )
 
-            #
-            # Base externa
-            #
+        #
+        # Modelo
+        #
 
-            if "external" in metrics:
+        mlflow.sklearn.log_model(
 
-                for metric_name, value in metrics["external"].items():
+            model,
 
-                    mlflow.log_metric(
+            artifact_path="model"
 
-                        metric_name,
-
-                        value
-
-                    )
-
-            #
-            # Modelo
-            #
-
-            mlflow.sklearn.log_model(
-
-                model,
-
-                artifact_path="model"
-
-            )
+        )

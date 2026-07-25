@@ -1,10 +1,10 @@
 #%%
 import sys
 import torch
+import os
 from model.strategy_model import ModelContext
 from huggingface_hub import login
 from dotenv import load_dotenv
-import os
 from Bio import SeqIO
 import re
 import numpy as np
@@ -280,28 +280,66 @@ for k, model_name in models_name.items():
 
         pca_data_fit  = scaler_fit.transform(data_to_fit.drop(columns=["protein_id"]).values) 
 
-        pca_calc = PCA(n_components=0.95, random_state=__SEED__)
-        pca_calc_fit = pca_calc.fit(pca_data_fit)
+        df_pos_pca_org = pd.DataFrame({
+            "protein_id": df_org_modelos["protein_id"].values
+        })
 
-        pca_fin_org = pca_calc_fit.transform(pca_org_modelos_stand)
-        pca_fin_man = pca_calc_fit.transform(pca_man_stand)
-        pca_fin_mus = pca_calc_fit.transform(pca_mus_stand)
+        df_pos_pca_man = pd.DataFrame({
+            "protein_id": df_man["protein_id"].values
+        })
 
-        #renomeando as colunas
-        n_components_final = pca_fin_org.shape[1]
+        df_pos_pca_mus = pd.DataFrame({
+            "protein_id": df_mus["protein_id"].values
+        })
 
-        colunas_pca = [
-            f"{k}_pca_{i}"
-            for i in range(n_components_final)
-        ]
+        hyperparametro_pca = [5,10,20,30,50,0.68]
 
-        df_pos_pca_org = pd.DataFrame(pca_fin_org, columns=colunas_pca)
-        df_pos_pca_man = pd.DataFrame(pca_fin_man, columns=colunas_pca)
-        df_pos_pca_mus = pd.DataFrame(pca_fin_mus, columns=colunas_pca)
+        for pca_param in hyperparametro_pca:
+        
+            pca_calc = PCA(n_components=pca_param, random_state=__SEED__)
+            pca_calc_fit = pca_calc.fit(pca_data_fit)
 
-        df_pos_pca_org.insert(0, "protein_id", list(df_org_modelos["protein_id"]))
-        df_pos_pca_man.insert(0, "protein_id", list(df_man["protein_id"]))
-        df_pos_pca_mus.insert(0, "protein_id", list(df_mus["protein_id"]))
+            pca_fin_org = pca_calc_fit.transform(pca_org_modelos_stand)
+            pca_fin_man = pca_calc_fit.transform(pca_man_stand)
+            pca_fin_mus = pca_calc_fit.transform(pca_mus_stand)
+
+            #renomeando as colunas
+            n_components_final = pca_fin_org.shape[1]
+
+            colunas_pca = [
+                f"{k}_n{str(pca_param).replace('.', '_')}_pca_{i}"
+                for i in range(n_components_final)
+            ]
+
+            df_org_temp = pd.DataFrame(
+                pca_fin_org,
+                columns=colunas_pca
+            )
+
+            df_man_temp = pd.DataFrame(
+                pca_fin_man,
+                columns=colunas_pca
+            )
+
+            df_mus_temp = pd.DataFrame(
+                pca_fin_mus,
+                columns=colunas_pca
+            )
+
+            df_pos_pca_org = pd.concat(
+                [df_pos_pca_org, df_org_temp],
+                axis=1
+            )
+
+            df_pos_pca_man = pd.concat(
+                [df_pos_pca_man, df_man_temp],
+                axis=1
+            )
+
+            df_pos_pca_mus = pd.concat(
+                [df_pos_pca_mus, df_mus_temp],
+                axis=1
+            )
 
         path_pasta_model = os.path.join(path_data_processed,k)
         # saves
